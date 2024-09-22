@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="appTitle">Bus Management App</title>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        header {
+            background-color: var(--app-color, #162e3b);
+            color: white;
+            text-align: center;
+            padding: 1rem;
+            width: 100%;
+            position: fixed;
+            top: 0;
+            z-index: 1000;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-top: 5rem;
+            padding: 1rem;
+            width: 90%;
+            max-width: 500px;
+        }
+        button {
+            background-color: var(--app-color, #162e3b);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            margin: 0.5rem 0;
+            width: 100%;
+        }
+        .input-group {
+            margin-bottom: 1rem;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .hidden {
+            display: none;
+        }
+        #qr-video {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+        }
+        .back-button {
+            background-color: var(--app-color, #162e3b);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            position: fixed;
+            top: 1rem;
+            left: 1rem;
+            z-index: 1000;
+        }
+        .bus-bar {
+            text-align: center;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+            color: var(--app-color, #162e3b);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1 id="appTitleHeader">Bus Management App</h1>
+    </header>
+    <div id="backButton" class="back-button hidden">Back</div>
+    <div class="container">
+        <div id="busNumberSection" class="section">
+            <h2>Enter Bus Number</h2>
+            <div class="input-group">
+                <label for="busNumberInput">Bus Number</label>
+                <input type="number" id="busNumberInput" placeholder="Enter Bus Number" required>
+            </div>
+            <button id="setBusNumberButton">Set Bus Number</button>
+        </div>
+        <div id="mainSection" class="section hidden">
+            <div class="bus-bar">Bus Number: <span id="busNumberDisplay"></span></div>
+            <button id="checkQrCodeButton">Check with QR Code</button>
+            <button id="manualEntryButton">Manual Entry</button>
+            <button id="viewPassengersButton">View Passengers</button>
+            <button id="changeBusButton">Change Bus</button>
+        </div>
+        <div id="manualEntrySection" class="section hidden">
+            <h2>Enter Card ID</h2>
+            <div class="input-group">
+                <label for="cardIdInput">Card ID</label>
+                <input type="text" id="cardIdInput" placeholder="Enter Card ID" required>
+            </div>
+            <button id="submitCardIdButton">Submit</button>
+        </div>
+        <div id="qrCodeSection" class="section hidden">
+            <h2>Scan QR Code</h2>
+            <video id="qr-video"></video>
+            <button id="stopQrCodeButton">Stop</button>
+        </div>
+        <div id="passengerListSection" class="section hidden">
+            <h2>Passengers</h2>
+            <ul id="passengerList"></ul>
+            <button id="backToMainButton">Back</button>
+        </div>
+        <div id="settingsSection" class="section hidden">
+            <h2>Settings</h2>
+            <div class="input-group">
+                <label for="appNameInput">App Name</label>
+                <input type="text" id="appNameInput" placeholder="Enter App Name" required>
+            </div>
+            <div class="input-group">
+                <label for="appColorInput">App Color</label>
+                <input type="color" id="appColorInput" value="#6200ea" required>
+            </div>
+            <button id="saveSettingsButton">Save Settings</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/@zxing/library@0.18.5/umd/index.min.js"></script>
+    <script>
+        const apiEndpoint = "/api/passengers";
+        const saveEndpoint = "/api/save";
+        let busNumber = null;
+        let passengers = [];
+        let insideBus = [];
+        let settings = {
+            appName: "Bus Management App",
+            appColor: "#6200ea"
+        };
+        let codeReader = null; // Definindo codeReader no escopo global
+    
+        document.getElementById('setBusNumberButton').addEventListener('click', () => {
+            busNumber = document.getElementById('busNumberInput').value;
+            if (busNumber) {
+                document.getElementById('busNumberSection').classList.add('hidden');
+                document.getElementById('mainSection').classList.remove('hidden');
+                document.getElementById('busNumberDisplay').textContent = busNumber;
+                loadPassengers(busNumber);
+            }
+        });
+    
+        document.getElementById('changeBusButton').addEventListener('click', () => {
+            document.getElementById('mainSection').classList.add('hidden');
+            document.getElementById('busNumberSection').classList.remove('hidden');
+        });
+    
+        document.getElementById('checkQrCodeButton').addEventListener('click', () => {
+            document.getElementById('qrCodeSection').classList.remove('hidden');
+            document.getElementById('mainSection').classList.add('hidden');
+            startQrCodeScanner();
+        });
+    
+        document.getElementById('manualEntryButton').addEventListener('click', () => {
+            document.getElementById('manualEntrySection').classList.remove('hidden');
+            document.getElementById('mainSection').classList.add('hidden');
+        });
+    
+        document.getElementById('submitCardIdButton').addEventListener('click', () => {
+            const cardId = document.getElementById('cardIdInput').value;
+            const passenger = passengers.find(p => p.idCartao === cardId);
+            if (passenger) {
+                insideBus.push(passenger);
+                updatePassengerList();
+                document.getElementById('manualEntrySection').classList.add('hidden');
+                document.getElementById('mainSection').classList.remove('hidden');
+                savePassengerData();
+            } else {
+                alert('Passenger not found.');
+            }
+        });
+    
+        document.getElementById('stopQrCodeButton').addEventListener('click', () => {
+            stopQrCodeScanner();
+            document.getElementById('qrCodeSection').classList.add('hidden');
+            document.getElementById('mainSection').classList.remove('hidden');
+        });
+    
+        document.getElementById('viewPassengersButton').addEventListener('click', () => {
+            document.getElementById('passengerListSection').classList.remove('hidden');
+            document.getElementById('mainSection').classList.add('hidden');
+        });
+    
+        document.getElementById('backToMainButton').addEventListener('click', () => {
+            document.getElementById('passengerListSection').classList.add('hidden');
+            document.getElementById('mainSection').classList.remove('hidden');
+        });
+    
+        document.getElementById('saveSettingsButton').addEventListener('click', () => {
+            const appName = document.getElementById('appNameInput').value;
+            const appColor = document.getElementById('appColorInput').value;
+            settings.appName = appName;
+            settings.appColor = appColor;
+            document.getElementById('appTitle').textContent = settings.appName;
+            document.getElementById('appTitleHeader').textContent = settings.appName;
+            document.querySelector('header').style.backgroundColor = appColor;
+            document.documentElement.style.setProperty('--app-color', appColor);
+            alert('Settings saved.');
+        });
+    
+        function fetchPassengers() {
+            fetch(apiEndpoint)
+                .then(response => response.json())
+                .then(data => {
+                    passengers = data;
+                    if (busNumber) {
+                        loadPassengers(busNumber);
+                    }
+                })
+                .catch(error => console.error('Error fetching passengers:', error));
+        }
+    
+        function loadPassengers(busNumber) {
+            fetch(`/api/bus/${busNumber}`)
+                .then(response => response.json())
+                .then(data => {
+                    insideBus = data;
+                    updatePassengerList();
+                })
+                .catch(error => console.error('Error loading bus passengers:', error));
+        }
+    
+        function updatePassengerList() {
+            const list = document.getElementById('passengerList');
+            list.innerHTML = '';
+            insideBus.forEach(passenger => {
+                const listItem = document.createElement('li');
+                listItem.textContent = `${passenger.nome} (${passenger.idCartao})`;
+                const removeButton = document.createElement('button');
+                removeButton.textContent = 'Remove';
+                removeButton.addEventListener('click', () => {
+                    insideBus = insideBus.filter(p => p.idCartao !== passenger.idCartao);
+                    updatePassengerList();
+                    savePassengerData();
+                });
+                listItem.appendChild(removeButton);
+                list.appendChild(listItem);
+            });
+        }
+    
+        function savePassengerData() {
+            fetch(saveEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ passengers: insideBus, busNumber })
+            })
+            .catch(error => console.error('Error saving passenger data:', error));
+        }
+    
+        function startQrCodeScanner() {
+            if (!codeReader) {
+                codeReader = new ZXing.BrowserQRCodeReader();
+            }
+            const videoElement = document.getElementById('qr-video');
+            codeReader.decodeOnceFromVideoDevice(undefined, videoElement)
+                .then(result => {
+                    const cardId = result.text;
+                    const passenger = passengers.find(p => p.idCartao === cardId);
+                    if (passenger) {
+                        insideBus.push(passenger);
+                        updatePassengerList();
+                        savePassengerData();
+                        alert(`${passenger.nome} has been added to the bus.`);
+                    } else {
+                        alert('Passenger not found.');
+                    }
+                    stopQrCodeScanner();
+                    document.getElementById('qrCodeSection').classList.add('hidden');
+                    document.getElementById('mainSection').classList.remove('hidden');
+                })
+                .catch(err => console.error('QR Code scanning error:', err));
+        }
+    
+        function stopQrCodeScanner() {
+            if (codeReader) {
+                codeReader.reset();
+                const videoElement = document.getElementById('qr-video');
+                if (videoElement.srcObject) {
+                    videoElement.srcObject.getTracks().forEach(track => track.stop());
+                }
+            }
+        }
+
+    
+        document.addEventListener('DOMContentLoaded', fetchPassengers);
+    </script>
+    
+</body>
+</html>
